@@ -1,0 +1,13 @@
+# dependencies
+/node_modules
+
+# uploads folder (if storing files locally)
+uploads
+
+# env file
+.env
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

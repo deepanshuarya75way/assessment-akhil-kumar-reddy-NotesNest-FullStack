@@ -14,6 +14,7 @@ import {
   InputAdornment,
   CircularProgress,
 } from "@mui/material";
+
 import DownloadIcon from "@mui/icons-material/Download";
 import SearchIcon from "@mui/icons-material/Search";
 import Fuse from "fuse.js";
@@ -22,13 +23,17 @@ import axios from "axios";
 const NotesList = () => {
   const backendUrl = process.env.REACT_APP_BACKEND_URL || "";
 
-  // Memoize apiUrl so it doesn't get re-created on every render.
-  // It only needs to change when backendUrl changes.
   const apiUrl = useCallback(
     (path) => {
-      if (!path.startsWith("/")) path = "/" + path;
-      if (backendUrl) return backendUrl.replace(/\/+$/, "") + path;
-      return path; // relative path (e.g. /api/notes/approved)
+      if (!path.startsWith("/")) {
+        path = "/" + path;
+      }
+
+      if (backendUrl) {
+        return backendUrl.replace(/\/+$/, "") + path;
+      }
+
+      return path;
     },
     [backendUrl]
   );
@@ -38,9 +43,23 @@ const NotesList = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const subjects = [...new Set(notes.map((note) => note.subject))];
+  const maxRetries = 3;
+  const retryDelay = 1000;
 
+  // Get unique subjects
+  const subjects = useMemo(() => {
+    return [
+      ...new Set(
+        notes
+          .map((note) => note.subject)
+          .filter(Boolean)
+      ),
+    ];
+  }, [notes]);
+
+  // Fuse search
   const fuse = useMemo(() => {
     return new Fuse(notes, {
       keys: ["title", "description", "subject", "contributor"],
@@ -48,54 +67,84 @@ const NotesList = () => {
     });
   }, [notes]);
 
-  const [error, setError] = useState(null);
-  const maxRetries = 3;
-  const retryDelay = 1000; // 1 second
-
-  // fetchNotes depends on apiUrl which is stable (memoized above)
+  // Fetch notes
   const fetchNotes = useCallback(
     async (retryCount = 0) => {
       try {
         const res = await axios.get(apiUrl("/api/notes/approved"), {
           timeout: 10000,
         });
-        setNotes(res.data);
-        setFilteredNotes(res.data);
+
+        const fetchedNotes = Array.isArray(res.data) ? res.data : [];
+
+        setNotes(fetchedNotes);
+        setFilteredNotes(fetchedNotes);
         setError(null);
       } catch (err) {
         console.error("Error fetching notes:", err);
 
         if (retryCount < maxRetries) {
-          console.log(`Retrying... Attempt ${retryCount + 1} of ${maxRetries}`);
-          setTimeout(
-            () => fetchNotes(retryCount + 1),
-            retryDelay * (retryCount + 1)
+          console.log(
+            `Retrying... Attempt ${retryCount + 1} of ${maxRetries}`
           );
+
+          setTimeout(() => {
+            fetchNotes(retryCount + 1);
+          }, retryDelay * (retryCount + 1));
         } else {
           const status = err?.response?.status || "N/A";
+
           const message =
-            err?.response?.data?.message || err.message || "Unknown error";
-          setError(`Unable to fetch notes. ${message} (status: ${status})`);
+            err?.response?.data?.message ||
+            err?.message ||
+            "Unknown error";
+
+          setError(
+            `Unable to fetch notes. ${message} (status: ${status})`
+          );
         }
       }
     },
-    [apiUrl, maxRetries, retryDelay]
+    [apiUrl]
   );
 
+  // Initial fetch
   useEffect(() => {
-    setLoading(true);
-    fetchNotes().finally(() => setLoading(false));
+    let mounted = true;
+
+    const loadNotes = async () => {
+      setLoading(true);
+
+      try {
+        await fetchNotes();
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadNotes();
+
+    return () => {
+      mounted = false;
+    };
   }, [fetchNotes]);
 
+  // Search and filter
   useEffect(() => {
     let results = notes;
 
-    if (searchQuery) {
-      results = fuse.search(searchQuery).map((res) => res.item);
+    if (searchQuery.trim()) {
+      results = fuse
+        .search(searchQuery.trim())
+        .map((result) => result.item);
     }
 
     if (selectedSubject) {
-      results = results.filter((note) => note.subject === selectedSubject);
+      results = results.filter(
+        (note) => note.subject === selectedSubject
+      );
     }
 
     setFilteredNotes(results);
@@ -103,19 +152,25 @@ const NotesList = () => {
 
   return (
     <Box sx={{ padding: 3 }}>
+      {/* Header */}
       <Box sx={{ textAlign: "center", mb: 3 }}>
         <img
           src={logo}
           alt="Notes Nest Logo"
-          style={{ height: 80, marginBottom: 10 }}
+          style={{
+            height: 80,
+            marginBottom: 10,
+          }}
         />
+
         <Typography variant="h4" sx={{ fontWeight: 600 }}>
           Browse Notes
         </Typography>
       </Box>
 
+      {/* Search and filter */}
       <Grid container spacing={2} sx={{ mb: 4 }}>
-        <Grid flex={1} minWidth={{ xs: "100%", md: "50%" }}>
+        <Grid item xs={12} md={7}>
           <TextField
             fullWidth
             label="Search notes..."
@@ -132,7 +187,7 @@ const NotesList = () => {
           />
         </Grid>
 
-        <Grid flex={1} minWidth={{ xs: "100%", md: "33.33%" }}>
+        <Grid item xs={12} md={5}>
           <TextField
             select
             fullWidth
@@ -142,8 +197,9 @@ const NotesList = () => {
             onChange={(e) => setSelectedSubject(e.target.value)}
           >
             <MenuItem value="">All Subjects</MenuItem>
-            {subjects.map((subject, index) => (
-              <MenuItem key={index} value={subject}>
+
+            {subjects.map((subject) => (
+              <MenuItem key={subject} value={subject}>
                 {subject}
               </MenuItem>
             ))}
@@ -151,27 +207,42 @@ const NotesList = () => {
         </Grid>
       </Grid>
 
+      {/* Loading */}
       {loading ? (
-        <Box sx={{ display: "flex", justifyContent: "center", mt: 6 }}>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            mt: 6,
+          }}
+        >
           <CircularProgress color="primary" />
         </Box>
       ) : error ? (
+        /* Error */
         <Box sx={{ textAlign: "center", mt: 4 }}>
           <Typography color="error" align="center">
             {error}
           </Typography>
+
           <Box sx={{ mt: 1 }}>
             <Button
               variant="text"
               color="primary"
-              onClick={() => {
+              onClick={async () => {
                 setLoading(true);
-                fetchNotes().finally(() => setLoading(false));
+                setError(null);
+
+                try {
+                  await fetchNotes();
+                } finally {
+                  setLoading(false);
+                }
               }}
-              sx={{ ml: 0 }}
             >
               Retry
             </Button>
+
             <Button
               variant="text"
               color="secondary"
@@ -183,48 +254,103 @@ const NotesList = () => {
               Open backend endpoint
             </Button>
           </Box>
+
           <Typography
             variant="caption"
             display="block"
-            sx={{ mt: 1, color: "gray" }}
+            sx={{
+              mt: 1,
+              color: "gray",
+            }}
           >
-            If this persists, verify that `REACT_APP_BACKEND_URL` is set and the
-            backend is reachable.
+            If this persists, verify that REACT_APP_BACKEND_URL is
+            set and the backend is reachable.
           </Typography>
         </Box>
       ) : filteredNotes.length === 0 ? (
-        <Typography variant="body1" sx={{ mx: "auto", mt: 5 }}>
+        /* No notes */
+        <Typography
+          variant="body1"
+          sx={{
+            mx: "auto",
+            mt: 5,
+            textAlign: "center",
+          }}
+        >
           No notes found.
         </Typography>
       ) : (
+        /* Notes */
         <Grid container spacing={3}>
           {filteredNotes.map((note) => (
             <Grid
+              item
+              xs={12}
+              sm={6}
+              md={4}
               key={note._id}
-              flex={1}
-              minWidth={{ xs: "100%", sm: "50%", md: "33.33%" }}
             >
-              <Card elevation={4} sx={{ borderRadius: 2 }}>
-                <CardContent>
+              <Card
+                elevation={4}
+                sx={{
+                  borderRadius: 2,
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <CardContent
+                  sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    height: "100%",
+                  }}
+                >
                   <Typography variant="h6" sx={{ mb: 1 }}>
                     {note.title}
                   </Typography>
+
                   <Typography variant="body2" sx={{ mb: 1 }}>
-                    <strong>Subject:</strong> {note.subject}
+                    <strong>Subject:</strong>{" "}
+                    {note.subject || "N/A"}
                   </Typography>
+
                   <Typography variant="body2" sx={{ mb: 2 }}>
-                    <strong>Contributor:</strong> {note.contributor}
+                    <strong>Contributor:</strong>{" "}
+                    {note.contributor || "N/A"}
                   </Typography>
-                  <Button
-                    variant="outlined"
-                    color="primary"
-                    startIcon={<DownloadIcon />}
-                    href={note.driveLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Download
-                  </Button>
+
+                  {/* View Note */}
+                  {note.slug && (
+                    <Button
+                      variant="text"
+                      color="primary"
+                      href={`/notes/${encodeURIComponent(note.slug)}`}
+                      sx={{
+                        mb: 1,
+                        alignSelf: "flex-start",
+                      }}
+                    >
+                      View Note
+                    </Button>
+                  )}
+
+                  {/* Download */}
+                  {note.driveLink && (
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      startIcon={<DownloadIcon />}
+                      href={note.driveLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      sx={{
+                        mt: "auto",
+                      }}
+                    >
+                      Download
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             </Grid>

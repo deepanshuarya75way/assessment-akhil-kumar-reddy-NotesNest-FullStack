@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const Document = require("../models/Document");
+const generateUniqueSlug = require("../utils/generateUniqueSlugs");
 
 // Submit a new document (drive link only)
 const uploadDocument = async (req, res) => {
@@ -60,12 +61,60 @@ const getPendingDocuments = async (req, res) => {
 const approveDocument = async (req, res) => {
   try {
     const { id } = req.params;
-    await Document.findByIdAndUpdate(id, { status: "approved" });
-    res.json({ message: "✅ Document approved." });
+    const document = await Document.findById(id);
+    
+    if(!document){
+      return res.status(404).json({
+        error: "Document not found"
+      });
+    }
+
+    const slug = await
+    generateUniqueSlug(document.title);
+    document.slug = slug;
+    document.status = "approved";
+    await document.save();
+    res.json({ message: "✅ Document approved.", document, });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
+
+const updateDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({
+        error: "Title is required",
+      });
+    }
+
+    const document = await Document.findById(id);
+
+    if (!document) {
+      return res.status(404).json({
+        error: "Document not found",
+      });
+    }
+
+    document.title = title.trim();
+    document.slug = await generateUniqueSlug(title.trim());
+
+    await document.save();
+
+    res.status(200).json(document);
+  } catch (err) {
+    console.error("Error updating document:", err);
+
+    res.status(500).json({
+      error: err.message,
+    });
+  }
+};
+
+
 
 // Delete a document by ID (admin only)
 const deleteDocument = async (req, res) => {
@@ -107,6 +156,36 @@ const adminLogin = (req, res) => {
   return res.json({ token });
 };
 
+
+const getDocumentBySlug = async (req, res) => {
+  try {
+    //const { slug } = req.params;
+
+    const document = await Document.findOne({
+      // $or: [
+      //   { slug: req.params.slug },
+      //   { previousSlug: req.params.slug },
+      // ],
+      slug: req.params.slug,
+      status: "approved",
+    });
+
+    if (!document) {
+      return res.status(404).json({
+        error: "Document not found",
+      });
+    }
+
+    res.json(document);
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+    });
+  }
+};
+
+
+
 // ✅ Export all together
 module.exports = {
   uploadDocument,
@@ -114,5 +193,8 @@ module.exports = {
   getPendingDocuments,
   approveDocument,
   deleteDocument,
+  getDocumentBySlug,
+  updateDocument,
   adminLogin, // added here
 };
+// https://docs.google.com/document/d/15a9gla82uJEsoe3zsZ3CAR_UkoM2j6SXKxliN1XwkF0/edit?usp=sharing

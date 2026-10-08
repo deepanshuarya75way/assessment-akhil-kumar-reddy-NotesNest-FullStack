@@ -3,6 +3,8 @@ const mongoose = require("mongoose");
 const documentSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
+    slug:{type: String, unique: true, sparse: true, index: true},
+    previousSlug:{type: [String], default: []},
     subject: { type: String, required: true },
     contributor: { type: String, required: true },
     category: { type: String, required: true },

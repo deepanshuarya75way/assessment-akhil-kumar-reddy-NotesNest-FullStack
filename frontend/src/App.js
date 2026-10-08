@@ -8,6 +8,7 @@ import UploadPage from "./pages/UploadPage";
 import AdminPage from "./pages/AdminPage";
 import NotFound from "./pages/NotFound";
 import AdminLogin from "./pages/AdminLogin";
+import NoteDetails from "./pages/NoteDetails";
 const App = () => {
   return (
     <Router>
@@ -18,6 +19,7 @@ const App = () => {
         <Route path="/admin" element={<AdminPage />} />
         <Route path="*" element={<NotFound />} />
         <Route path="/admin-login" element={<AdminLogin />} />
+        <Route path="/notes/:slug" element={<NoteDetails />} />
       </Routes>
       <Footer /> {/* 👈 Add this */}
     </Router>

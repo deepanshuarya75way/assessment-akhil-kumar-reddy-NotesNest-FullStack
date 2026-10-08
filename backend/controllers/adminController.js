@@ -5,6 +5,8 @@
   - does NOT use jwt
   - returns clear JSON errors (no HTML)
 */
+
+const jwt = require('jsonwebtoken');
 exports.adminLogin = (req, res) => {
   try {
     console.log('DEBUG adminLogin invoked - req.body:', req.body);
@@ -26,14 +28,15 @@ exports.adminLogin = (req, res) => {
 
     if (password === process.env.ADMIN_PASSWORD) {
       console.log('adminLogin: password matched - returning token placeholder');
-      return res.status(200).json({ ok: true, message: 'Logged in', token: 'admin-placeholder-token' });
+      const token = jwt.sign({role:'admin'}, process.env.JWT_SECRET, {expiresIn:'2h'});
+      return res.status(200).json({ ok: true, message: 'Logged in', token });
     }
 
     console.warn('adminLogin: invalid password attempt');
     return res.status(401).json({ ok: false, message: 'Invalid password' });
   } catch (err) {
     console.error('adminLogin unexpected error:', err && err.stack ? err.stack : err);
-    // Return JSON with error — avoid server-wide HTML error page
+    // Return JSON with error ï¿½ avoid server-wide HTML error page
     return res.status(500).json({ ok: false, message: 'Internal Server Error' });
   }
 };
